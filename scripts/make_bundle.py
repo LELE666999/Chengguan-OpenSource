@@ -4,7 +4,7 @@ icon_name = 'ChengguanUserIcon'
 info = {
     'CFBundleExecutable': 'Chengguan', 'CFBundleIdentifier': 'studio.lele.Chengguan',
     'CFBundleName': '澄观', 'CFBundleDisplayName': '澄观',
-    'CFBundlePackageType': 'APPL', 'CFBundleShortVersionString': '0.20.0', 'CFBundleVersion': '57',
+    'CFBundlePackageType': 'APPL', 'CFBundleShortVersionString': '0.20.1', 'CFBundleVersion': '58',
     'LSMinimumSystemVersion': '15.0', 'NSHighResolutionCapable': True,
     'NSAudioCaptureUsageDescription': '为你选择的 App 调节独立音量。音频只在本机实时混音，不录制、不存储、不上传。',
     'NSRemovableVolumesUsageDescription': '显示容量与格式，检查 DCIM 目录；你点击测速时仅写入并读回独立临时文件。完成后释放，不修改或上传现有文件。',

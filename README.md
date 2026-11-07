@@ -68,6 +68,7 @@ python3 -m venv .venv
 - 默认自动识别常见配置；「Mac 代理 → …」可选择其他配置。只保存配置文件路径，认证值仅在内存中使用，不修改 Clash 配置，不开放控制端口，不保存连接域名或进程记录。计数回退、断线或过长间隔重新建立基线，缺失速度显示「—」。
 - IP 归属仅向 `https://ipwho.is/{公网IP}` 查询，进程内缓存 24 小时；不向该服务发送 VEID、KiwiVM Key 或代理认证信息。不对局域网地址进行外部查询，归属位置仅为数据库估计。
 - 延迟是 Mac 到服务器 SSH 端口的 TCP 建连时间，并非 ICMP ping、丢包率或带宽。拒绝连接或超时不表示服务器离线。网站测试由用户点击触发，经本机混合代理端口按当前规则发送 HEAD 请求，不切换节点或更改路由。
+- 延迟用颜色辅助阅读：小于 300 ms 为绿、300–799 ms 为黄、800–1499 ms 为橙、1500 ms 起为红；连接失败为红，未测试为灰。网站耗时包含该次 HTTP 响应过程，颜色是界面提示，不代表代理节点的独立 ping 值。
 
 接口参考：[Mihomo API](https://wiki.metacubex.one/api/)、[IP 归属 API](https://ipwhois.io/documentation)、[Clash Verge 服务 IPC 路径](https://github.com/clash-verge-rev/clash-verge-service-ipc/blob/v2.7.7/src/core/paths.rs)。
 

@@ -2,6 +2,41 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+private enum NetworkLatencyAppearance {
+  case unknown, fast, normal, slow, high, failed
+  init(_ milliseconds: Double?, failed: Bool = false) {
+    if failed { self = .failed }
+    else if let milliseconds, milliseconds.isFinite, milliseconds >= 0 {
+      switch milliseconds {
+      case ..<300: self = .fast
+      case ..<800: self = .normal
+      case ..<1500: self = .slow
+      default: self = .high
+      }
+    } else { self = .unknown }
+  }
+  var color: Color {
+    switch self {
+    case .unknown: return .secondary
+    case .fast: return Theme.adaptive(light: .init(srgbRed: 0.12, green: 0.45, blue: 0.32, alpha: 1), dark: .init(srgbRed: 0.44, green: 0.80, blue: 0.69, alpha: 1))
+    case .normal: return Theme.adaptive(light: .init(srgbRed: 0.56, green: 0.40, blue: 0.04, alpha: 1), dark: .init(srgbRed: 0.94, green: 0.77, blue: 0.33, alpha: 1))
+    case .slow: return Theme.adaptive(light: .init(srgbRed: 0.68, green: 0.30, blue: 0.05, alpha: 1), dark: .init(srgbRed: 1, green: 0.64, blue: 0.34, alpha: 1))
+    case .high, .failed: return Theme.adaptive(light: .init(srgbRed: 0.74, green: 0.19, blue: 0.18, alpha: 1), dark: .init(srgbRed: 1, green: 0.45, blue: 0.44, alpha: 1))
+    }
+  }
+  var label: String {
+    switch self {
+    case .unknown: return "未测试"
+    case .fast: return "快速"
+    case .normal: return "一般"
+    case .slow: return "偏慢"
+    case .high: return "高延迟"
+    case .failed: return "连接失败"
+    }
+  }
+  static let guide = "小于 300 ms 为绿色；300–799 ms 为黄色；800–1499 ms 为橙色；1500 ms 及以上为红色。"
+}
+
 struct NetworkMetricView: View {
   let title: String, value: String
   var note: String? = nil
@@ -25,6 +60,7 @@ struct ServerNetworkPanel: View {
     VStack(alignment: .leading, spacing: compact ? 14 : 19) {
       HStack {
         Label("服务器网络", systemImage: "cloud").font(.system(size: 12, weight: .medium))
+          .help("服务器整机的区间平均速度，非带宽上限；近 24h 为接口采样覆盖的数据，不等于计费流量。")
         Spacer(minLength: 6)
         if let seconds = stats?.interval {
           Text(seconds >= 60 ? "\(Int(seconds / 60)) 分钟均速" : "\(Int(seconds)) 秒均速").font(.system(size: 10)).foregroundStyle(.secondary)
@@ -47,14 +83,13 @@ struct ServerNetworkPanel: View {
             Text(diagnostics.probing ? "测试中" : diagnostics.latency.map { String(format: "%.0f ms", $0) } ?? (diagnostics.probeFailed ? "未响应" : "测延迟"))
               .monospacedDigit()
           }.padding(.horizontal, 9).frame(height: 29).contentShape(Capsule())
-        }.buttonStyle(AIControlButtonStyle()).disabled(diagnostics.probing || diagnostics.ip == nil)
+        }.buttonStyle(AIControlButtonStyle(tint: NetworkLatencyAppearance(diagnostics.latency, failed: diagnostics.probeFailed).color)).disabled(diagnostics.probing || diagnostics.ip == nil)
           .help("Mac 到服务器 TCP \(diagnostics.port) 端口的连接耗时；端口拒绝或超时不代表服务器离线。")
           .accessibilityLabel("测试服务器连接延迟")
       }.font(.system(size: 10)).foregroundStyle(.secondary)
     }.padding(compact ? 16 : 20).frame(maxWidth: .infinity, minHeight: compact ? nil : 173, alignment: .topLeading)
       .frame(maxHeight: compact ? nil : .infinity, alignment: .topLeading)
       .background(Theme.panel, in: RoundedRectangle(cornerRadius: compact ? 18 : 22))
-      .help("服务器整机的区间平均速度，非带宽上限；近 24h 为接口采样覆盖的数据，不等于计费流量。")
   }
 }
 
@@ -68,6 +103,7 @@ struct MacProxyPanel: View {
     VStack(alignment: .leading, spacing: compact ? 14 : 19) {
       HStack(spacing: 6) {
         Label("Mac 代理", systemImage: "arrow.triangle.branch").font(.system(size: 12, weight: .medium))
+          .help("每 2 秒读取本机代理内核；包含经过该内核的直连和代理流量，累计值自内核计数器启动或重置起算。不是整台 VPS 的用量。")
         Spacer(minLength: 4)
         Circle().fill(proxy.stale ? Color.secondary : ServerPalette.traffic).frame(width: 5, height: 5)
         Text(proxy.stale ? "待连接" : proxy.source ?? "Mihomo").font(.system(size: 10)).foregroundStyle(.secondary)
@@ -111,11 +147,18 @@ struct MacProxyPanel: View {
         }
         HStack(spacing: 6) {
           ForEach(diagnostics.sites) { site in
+            let appearance = NetworkLatencyAppearance(site.milliseconds, failed: site.failure != nil)
+            let value = site.milliseconds.map { String(format: "%.0f ms", $0) } ?? site.failure ?? "—"
             VStack(spacing: 6) {
               Text(site.name).font(.system(size: 11, weight: .medium)).lineLimit(1).minimumScaleFactor(0.8)
-              Text(site.milliseconds.map { String(format: "%.0f ms", $0) } ?? site.failure ?? "—")
-                .font(.system(size: 10, weight: .medium)).monospacedDigit().foregroundStyle(site.failure != nil ? Color.orange : ServerPalette.traffic).lineLimit(1).minimumScaleFactor(0.8)
-            }.frame(maxWidth: .infinity).padding(.vertical, 11).background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
+              HStack(spacing: 4) {
+                Circle().fill(appearance.color).frame(width: 4, height: 4).accessibilityHidden(true)
+                Text(value).font(.system(size: 10, weight: .semibold)).monospacedDigit().foregroundStyle(appearance.color).lineLimit(1).minimumScaleFactor(0.8)
+              }
+            }.frame(maxWidth: .infinity).padding(.vertical, 11)
+              .background(appearance.color.opacity(0.065), in: RoundedRectangle(cornerRadius: 12))
+              .help(appearance.label + " · 经当前代理规则的网站响应耗时。" + NetworkLatencyAppearance.guide)
+              .accessibilityElement(children: .ignore).accessibilityLabel(site.name + "，" + value + "，" + appearance.label)
           }
         }
         HStack {
@@ -130,7 +173,6 @@ struct MacProxyPanel: View {
       .frame(maxHeight: compact ? nil : .infinity, alignment: .topLeading)
       .background(Theme.panel, in: RoundedRectangle(cornerRadius: compact ? 18 : 22))
       .onChange(of: proxy.mixedPort) { _, _ in diagnostics.resetSites() }
-      .help("每 2 秒读取本机代理内核；包含经过该内核的直连和代理流量，累计值自内核计数器启动或重置起算。不是整台 VPS 的用量。")
   }
   private func chooseConfiguration() {
     let panel = NSOpenPanel(); panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
