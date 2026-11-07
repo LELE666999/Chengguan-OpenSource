@@ -5,6 +5,33 @@ import DisplayBridge
 
 @main enum Launcher {
   static func main() {
+    if CommandLine.arguments.contains("--server-network-check-json") {
+      let monitor = ServerMonitor.shared
+      monitor.refresh()
+      let deadline = Date().addingTimeInterval(70)
+      while monitor.loading && Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+      let proxy = MacProxyMonitor.shared; proxy.show()
+      let proxyDeadline = Date().addingTimeInterval(8)
+      while Date() < proxyDeadline && (proxy.snapshot == nil || proxy.upload == nil) { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+      let diagnostics = ServerConnectionDiagnostics.shared
+      diagnostics.observe(addresses: monitor.snapshot?.addresses ?? [], fallback: monitor.profile?.host, port: monitor.snapshot?.sshPort)
+      let lookupDeadline = Date().addingTimeInterval(10)
+      while (diagnostics.lookingUp || diagnostics.probing) && Date() < lookupDeadline { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+      // Credentials, IP addresses and destination metadata are excluded from diagnostic output.
+      let stats = monitor.snapshot?.network
+      let output: [String: Any] = ["server_connected": monitor.snapshot != nil, "server_error": monitor.error as Any? ?? NSNull(),
+        "server_samples": stats?.samples.count ?? 0, "server_interval_s": stats?.interval as Any? ?? NSNull(),
+        "server_upload_Bps": stats?.upload as Any? ?? NSNull(), "server_download_Bps": stats?.download as Any? ?? NSNull(),
+        "server_sample_time": stats?.latest?.time.timeIntervalSince1970 as Any? ?? NSNull(),
+        "proxy_connected": proxy.snapshot != nil, "proxy_source": proxy.source as Any? ?? NSNull(), "proxy_version": proxy.version as Any? ?? NSNull(),
+        "proxy_upload_Bps": proxy.upload as Any? ?? NSNull(), "proxy_download_Bps": proxy.download as Any? ?? NSNull(),
+        "proxy_upload_total": proxy.snapshot?.uploadTotal as Any? ?? NSNull(), "proxy_download_total": proxy.snapshot?.downloadTotal as Any? ?? NSNull(),
+        "proxy_connections": proxy.snapshot?.connections as Any? ?? NSNull(), "proxy_memory": proxy.snapshot?.memory as Any? ?? NSNull(),
+        "ip_lookup_ok": diagnostics.info != nil, "tcp_ms": diagnostics.latency as Any? ?? NSNull()]
+      if let data = try? JSONSerialization.data(withJSONObject: output, options: [.prettyPrinted, .sortedKeys]) { print(String(decoding: data, as: UTF8.self)) }
+      proxy.stop(); monitor.stop(); diagnostics.clear()
+      return
+    }
     if let index = CommandLine.arguments.firstIndex(of: "--import-server-profile"), CommandLine.arguments.count > index + 1 {
       do {
         let data = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[index + 1]))
@@ -415,7 +442,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
   private var hoverPresenter: MenuHoverPresenter?
   private weak var mainWindow: NSWindow?
   private weak var model: MonitorModel?
-  func applicationWillTerminate(_ notification: Notification) { StorageSpeedStore.shared.cancel(); AppAudioMixer.shared.reset(); LiveActivity.shared.end(); CableMonitor.shared.stop(); ExternalStorageMonitor.shared.stop(); NASMonitor.shared.stop(); LegacyNASMonitor.shared.stop(); ServerMonitor.shared.stop() }
+  func applicationWillTerminate(_ notification: Notification) { StorageSpeedStore.shared.cancel(); AppAudioMixer.shared.reset(); LiveActivity.shared.end(); CableMonitor.shared.stop(); ExternalStorageMonitor.shared.stop(); NASMonitor.shared.stop(); LegacyNASMonitor.shared.stop(); ServerMonitor.shared.stop(); MacProxyMonitor.shared.stop(); ServerConnectionDiagnostics.shared.clear() }
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     guard StorageFormatStore.shared.running else { return .terminateNow }
     let alert = NSAlert(); alert.messageText = "格式化正在进行"

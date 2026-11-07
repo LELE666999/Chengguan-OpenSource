@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-private enum ServerPalette {
+enum ServerPalette {
   static let memory = Theme.adaptive(light: .init(srgbRed: 0.54, green: 0.36, blue: 0.74, alpha: 1), dark: .init(srgbRed: 0.75, green: 0.61, blue: 0.94, alpha: 1))
   static let load = Theme.adaptive(light: .init(srgbRed: 0.28, green: 0.52, blue: 0.72, alpha: 1), dark: .init(srgbRed: 0.48, green: 0.76, blue: 0.94, alpha: 1))
   static let traffic = Theme.adaptive(light: .init(srgbRed: 0.20, green: 0.52, blue: 0.44, alpha: 1), dark: .init(srgbRed: 0.44, green: 0.80, blue: 0.69, alpha: 1))
@@ -20,6 +20,8 @@ private enum ServerTrendMetric: String, CaseIterable {
 struct ServerWorkspace: View {
   var compact = false
   @ObservedObject private var server = ServerMonitor.shared
+  @ObservedObject private var proxy = MacProxyMonitor.shared
+  @ObservedObject private var diagnostics = ServerConnectionDiagnostics.shared
   @State private var showConnection = false
   @State private var detailExpanded: Bool
   @State private var metric = ServerTrendMetric.memory
@@ -31,6 +33,10 @@ struct ServerWorkspace: View {
       if compact { content.padding(6) }
       else { ScrollView { content.padding(24).frame(maxWidth: 1220).frame(maxWidth: .infinity) } }
     }.sheet(isPresented: $showConnection) { ServerConnectionView() }
+      .onAppear { proxy.show(); updateDiagnostics() }
+      .onDisappear { proxy.hide() }
+      .onChange(of: server.snapshot) { _, _ in updateDiagnostics() }
+      .onChange(of: server.profile) { _, profile in if profile == nil { diagnostics.clear() } else { updateDiagnostics() } }
   }
   private var content: some View {
     VStack(alignment: .leading, spacing: compact ? 14 : 18) {
@@ -41,6 +47,7 @@ struct ServerWorkspace: View {
       }
       if let snapshot = server.snapshot {
         resources(snapshot)
+        network(snapshot)
         if compact { ServerTrendPanel(samples: server.history.samples, end: snapshot.time, metric: $metric, compact: true) }
         else {
           ViewThatFits(in: .horizontal) {
@@ -55,17 +62,37 @@ struct ServerWorkspace: View {
           }
         }
         traffic(snapshot)
+        ServerIPPanel(addresses: snapshot.addresses, compact: compact)
         details(snapshot)
       } else { emptyState }
       HStack(spacing: 5) {
         Image(systemName: "lock.shield")
-        Text("只读监测 · 每分钟同步")
+        Text(compact ? "只读监测" : "只读 · 服务器 1 分钟 / 代理 2 秒")
         Spacer()
         if let snapshot = server.snapshot {
           Text(server.stale ? "上次" : "同步于")
           Text(snapshot.time, style: .time).monospacedDigit()
         }
       }.font(.system(size: 10)).foregroundStyle(.secondary).padding(.top, 2)
+    }
+  }
+  private func updateDiagnostics() {
+    guard server.snapshot != nil else { return }
+    diagnostics.observe(addresses: server.snapshot?.addresses ?? [], fallback: server.profile?.host, port: server.snapshot?.sshPort)
+  }
+  private func network(_ snapshot: ServerSnapshot) -> some View {
+    Group {
+      if compact {
+        VStack(spacing: 14) { ServerNetworkPanel(stats: snapshot.network, compact: true); MacProxyPanel(compact: true) }
+      } else {
+        ViewThatFits(in: .horizontal) {
+          HStack(alignment: .top, spacing: 16) {
+            ServerNetworkPanel(stats: snapshot.network).frame(minWidth: 330, maxHeight: .infinity, alignment: .top)
+            MacProxyPanel().frame(minWidth: 330, maxHeight: .infinity, alignment: .top)
+          }
+          VStack(spacing: 16) { ServerNetworkPanel(stats: snapshot.network); MacProxyPanel() }
+        }
+      }
     }
   }
   private var header: some View {
@@ -177,7 +204,6 @@ struct ServerWorkspace: View {
       }.buttonStyle(CareRowStyle()).accessibilityLabel(detailExpanded ? "收起连接详情" : "展开连接详情")
       if detailExpanded {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 24), count: compact ? 1 : 2), alignment: .leading, spacing: 14) {
-          detail("公网地址", value: snapshot.addresses.first ?? server.profile?.host ?? "—", copy: true)
           if let os = snapshot.os { detail("系统", value: os) }
           if let hostname = snapshot.hostname { detail("主机名", value: hostname) }
           if let port = snapshot.sshPort { detail("SSH 端口", value: String(port)) }

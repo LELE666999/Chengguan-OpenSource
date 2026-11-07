@@ -44,6 +44,7 @@ struct ServerSnapshot: Equatable, Sendable {
   var sshPort: Int?
   var cpuThrottled: Bool?, diskThrottled: Bool?
   var apiSeconds: Double
+  var network: ServerNetworkStats? = nil
   var memoryUsed: Double? { Self.used(total: memoryTotal, available: memoryAvailable) }
   var swapUsed: Double? { Self.used(total: swapTotal, available: swapAvailable) }
   var transferRemaining: Double? { guard let total = transferTotal, let used = transferUsed else { return nil }; return max(0, total - used) }
@@ -76,10 +77,11 @@ struct ServerSnapshot: Equatable, Sendable {
 
 /// Fixed, read-only KiwiVM endpoint. Keys stay in the POST body, never the URL.
 enum KiwiClient {
-  static func request(profile: ServerProfile, key: String) throws -> URLRequest {
+  enum Reading: String { case live = "getLiveServiceInfo", network = "getRawUsageStats" }
+  static func request(profile: ServerProfile, key: String, reading: Reading = .live) throws -> URLRequest {
     guard profile.valid else { throw ServerError.profile }
     guard !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw ServerError.key }
-    var request = URLRequest(url: URL(string: "https://api.64clouds.com/v1/getLiveServiceInfo")!)
+    var request = URLRequest(url: URL(string: "https://api.64clouds.com/v1/" + reading.rawValue)!)
     request.httpMethod = "POST"; request.timeoutInterval = 30
     request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
     request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -99,7 +101,14 @@ enum KiwiClient {
     guard let http = response as? HTTPURLResponse else { throw ServerError.transport }
     guard http.statusCode == 200 else { throw ServerError.http(http.statusCode) }
     guard data.count <= 8_000_000 else { throw ServerError.malformed }
-    return try ServerSnapshot.parse(data, apiSeconds: Date().timeIntervalSince(start))
+    var snapshot = try ServerSnapshot.parse(data, apiSeconds: Date().timeIntervalSince(start))
+    // Optional read-only statistics must not turn a healthy live-status response into a connection failure.
+    if let request = try? Self.request(profile: profile, key: key, reading: .network),
+       let data = try? await NetworkReadClient.read(request, limit: 16_000_000) {
+      snapshot.network = try? ServerNetworkStats.parse(data)
+    }
+    try Task.checkCancellation()
+    return snapshot
   }
 }
 private final class ServerNoRedirect: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
